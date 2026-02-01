@@ -1,0 +1,136 @@
+
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bioneers 2D Clone - Mobilfreundlich</title>
+<style>
+body { margin:0; overflow:hidden; background:#0e0e11; font-family:system-ui; color:#fff; }
+canvas { display:block; background:#1c1c2a; }
+#ui { position:absolute; top:5px; left:5px; font-weight:bold; font-size:16px; z-index:10; }
+#ui span { margin-right:15px; }
+#divideButton { position:absolute; bottom:10px; left:50%; transform:translateX(-50%); padding:10px 20px; font-size:18px; background:#4CAF50; border:none; border-radius:10px; color:#fff; opacity:0.8; }
+#divideButton:active { opacity:1; }
+</style>
+</head>
+<body>
+<div id="ui">ATP: <span id="atp">0</span> | Zellen: <span id="cells">1</span> | Gesundheit: <span id="health">100</span></div>
+<button id="divideButton">Zelle teilen</button>
+<canvas id="gameCanvas"></canvas>
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+function resizeCanvas(){ canvas.width=window.innerWidth; canvas.height=window.innerHeight; }
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
+
+const pointer={x:null,y:null};
+canvas.addEventListener('mousemove', e=>{ pointer.x=e.clientX; pointer.y=e.clientY; });
+canvas.addEventListener('mouseleave', ()=>{ pointer.x=null; pointer.y=null; });
+canvas.addEventListener('touchmove', e=>{ const t=e.touches[0]; pointer.x=t.clientX; pointer.y=t.clientY; }, {passive:true});
+canvas.addEventListener('touchend', ()=>{ pointer.x=null; pointer.y=null; });
+
+function distance(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
+
+let game = {
+  cells:[{ x:canvas.width/2, y:canvas.height/2, radius:20, health:100, speed:2, type:'human', membranePoints:12, angleOffsets:[] }],
+  resources:{atp:20},
+  bloodFlow:[],
+  enemies:[],
+  organs:[
+    {x:canvas.width/4,y:canvas.height/3,name:"Herz",radius:30},
+    {x:canvas.width*3/4,y:canvas.height/3,name:"Lunge",radius:30},
+    {x:canvas.width/2,y:canvas.height*2/3,name:"Leber",radius:25}
+  ],
+  pathPoints:[
+    {x:canvas.width/4,y:canvas.height/3},
+    {x:canvas.width/2,y:canvas.height/3},
+    {x:canvas.width*3/4,y:canvas.height/3},
+    {x:canvas.width*3/4,y:canvas.height*2/3},
+    {x:canvas.width/2,y:canvas.height*2/3},
+    {x:canvas.width/4,y:canvas.height/3}
+  ]
+};
+
+// Init Membrane Offsets
+game.cells.forEach(c=>{ for(let i=0;i<c.membranePoints;i++) c.angleOffsets.push(Math.random()*0.2); });
+
+for(let i=0;i<50;i++){ game.bloodFlow.push({ pos:{...game.pathPoints[0]}, targetIndex:1, speed:1+Math.random()*1.5 }); }
+
+function spawnEnemy(){
+  game.enemies.push({ x:Math.random()*canvas.width, y:Math.random()*canvas.height, radius:12, damage:1, speed:0.5 });
+}
+
+function drawCell(cell){
+  const points = cell.membranePoints;
+  const angleStep = (Math.PI*2)/points;
+  ctx.fillStyle="#4CAF50";
+  ctx.beginPath();
+  for(let i=0;i<points;i++){
+    const angle = i*angleStep;
+    const offset = cell.radius * (0.8 + 0.4*Math.sin(Date.now()*0.002 + i));
+    const x = cell.x + Math.cos(angle+cell.angleOffsets[i])*offset;
+    const y = cell.y + Math.sin(angle+cell.angleOffsets[i])*offset;
+    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  }
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle="#2E7D32";
+  ctx.beginPath(); ctx.arc(cell.x, cell.y, cell.radius*0.4,0,Math.PI*2); ctx.fill();
+}
+
+function updateCell(cell){
+  if(pointer.x!==null){ let dx=pointer.x-cell.x; let dy=pointer.y-cell.y; let dist=Math.hypot(dx,dy); if(dist>1){ cell.x+=dx/dist*cell.speed; cell.y+=dy/dist*cell.speed; } }
+  for(let i=0;i<cell.angleOffsets.length;i++){ cell.angleOffsets[i]+= (Math.random()-0.5)*0.01; }
+}
+
+function divideCell(cell){
+  if(game.resources.atp<20) return;
+  game.resources.atp-=20;
+  const newCell = {...cell};
+  newCell.x+=15; newCell.y+=15; newCell.radius*=0.9; newCell.angleOffsets = [...cell.angleOffsets];
+  cell.radius*=0.9;
+  game.cells.push(newCell);
+}
+
+document.getElementById('divideButton').addEventListener('click', ()=>{ divideCell(game.cells[0]); });
+
+function update(){
+  game.cells.forEach(updateCell);
+  game.bloodFlow.forEach(n=>{
+    const target=game.pathPoints[n.targetIndex];
+    let dx=target.x-n.pos.x, dy=target.y-n.pos.y;
+    let dist=Math.hypot(dx,dy);
+    if(dist<1){ n.targetIndex=(n.targetIndex+1)%game.pathPoints.length; }
+    else{ n.pos.x+=dx/dist*n.speed; n.pos.y+=dy/dist*n.speed; }
+    game.cells.forEach(cell=>{ if(distance(n.pos,cell)<cell.radius+5){ game.resources.atp+=2; n.pos={...game.pathPoints[0]}; n.targetIndex=1; } });
+  });
+  game.enemies.forEach(e=>{
+    let target=game.cells[0];
+    let dx=target.x-e.x, dy=target.y-e.y;
+    let dist=Math.hypot(dx,dy);
+    if(dist>0){ e.x+=dx/dist*e.speed; e.y+=dy/dist*e.speed; }
+    if(distance(e,target)<e.radius+target.radius){ target.health-=e.damage; game.resources.atp=Math.max(0,game.resources.atp-1); }
+  });
+  game.organs.forEach(o=>{ game.cells.forEach(cell=>{ if(distance(o,cell)<cell.radius+o.radius) game.resources.atp+=0.05; }); });
+  if(Math.random()<0.01) spawnEnemy();
+  game.cells[0].health=Math.max(0,Math.min(100,game.cells[0].health));
+  if(game.cells[0].health<=0){ alert("Zelle gestorben! Fortschritt zurückgesetzt."); location.reload(); }
+}
+
+function draw(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  game.bloodFlow.forEach(n=>{ ctx.fillStyle="#FFD700"; ctx.beginPath(); ctx.arc(n.pos.x,n.pos.y,5,0,Math.PI*2); ctx.fill(); });
+  game.organs.forEach(o=>{ ctx.fillStyle="#1e90ff"; ctx.beginPath(); ctx.arc(o.x,o.y,o.radius,0,Math.PI*2); ctx.fill(); ctx.fillStyle="#fff"; ctx.fillText(o.name,o.x-15,o.y+4); });
+  game.cells.forEach(drawCell);
+  game.enemies.forEach(e=>{ ctx.fillStyle="#FF3B3B"; ctx.beginPath(); ctx.arc(e.x,e.y,e.radius,0,Math.PI*2); ctx.fill(); });
+  document.getElementById('atp').textContent=Math.floor(game.resources.atp);
+  document.getElementById('cells').textContent=game.cells.length;
+  document.getElementById('health').textContent=Math.floor(game.cells[0].health);
+}
+
+function loop(){ update(); draw(); requestAnimationFrame(loop); }
+loop();
+</script>
+</body>
+</html>
